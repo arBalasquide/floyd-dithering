@@ -4,8 +4,6 @@
 
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/opencv.hpp"
-#include <bits/getopt_core.h>
-#include <cstdint>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -14,6 +12,7 @@
 #include <cmath>
 #include <iostream>
 #include <sys/time.h>
+#include <cstdint>
 
 using namespace cv;
 
@@ -27,7 +26,7 @@ using namespace cv;
 // Use Atkinson bias rather than Floyd-Steinberg
 #define ATKINSON true
 
-#define GRAYSCALE true
+#define GRAYSCALE false
 
 /**
  * Do not let value exceed color range
@@ -116,6 +115,7 @@ Vec3b find_closest_palette_color(Vec3b pixel) {
   uint8_t cr = pixel[2] & maskBit;
 
 #endif
+
   Vec3b newpixel(cb, cg, cr);
 
   return newpixel;
@@ -148,7 +148,7 @@ void dither(Mat *img) {
 }
 
 int main(int argc, char **argv) {
-  char *filePath = "/home/adrian/input.jpg";
+  char *filePath = "/home/adrian/dog.jpg";
 
   // TODO: Change to be an cli arg
   std::string image_path = samples::findFile(filePath);
