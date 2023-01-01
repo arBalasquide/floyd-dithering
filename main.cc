@@ -5,6 +5,7 @@
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/opencv.hpp"
 #include <bits/getopt_core.h>
+#include <cstdint>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -22,6 +23,11 @@ using namespace cv;
 
 // Do we want to actually dither or just reduce colors?
 #define DITHER true
+
+// Use Atkinson bias rather than Floyd-Steinberg
+#define ATKINSON true
+
+#define GRAYSCALE true
 
 /**
  * Do not let value exceed color range
@@ -56,10 +62,17 @@ Vec3b error_channel_diffussion(Vec3b pixel, const int32_t quant_error[],
 
 void error_diffusion(Mat *img, const int32_t quant_error[], int x, int y) {
 
+#if ATKINSON
+  double a = 1.0f / 8.0f;
+  double b = 1.0f / 8.0f;
+  double c = 1.0f / 8.0f;
+  double d = 1.0f / 8.0f;
+#else
   double a = 7.0f / 16.0f;
   double b = 3.0f / 16.0f;
   double c = 5.0f / 16.0f;
   double d = 1.0f / 16.0f;
+#endif
 
   Vec3b pixel = img->at<Vec3b>(x + 1, y);
   img->at<Vec3b>(x + 1, y) = error_channel_diffussion(pixel, quant_error, a);
@@ -78,6 +91,9 @@ void error_diffusion(Mat *img, const int32_t quant_error[], int x, int y) {
 
 Vec3b find_closest_palette_color(Vec3b pixel) {
 
+// I like how the second one changes the colors, the differences are a bit
+// subtle try it out and see which one you like most
+#if false
   const float fLevels = (1 << COLOR_BITS) - 1;
 
   // don't let values overflow, just clamp to max
@@ -90,7 +106,16 @@ Vec3b find_closest_palette_color(Vec3b pixel) {
   uint8_t cg = uint8_t(
       clamp(std::round(float(pixel[1]) / 255.0f * fLevels) / fLevels * 255.0f,
             0.0f, 255.0f));
+#else
+  uchar maskBit = 0xFF;
 
+  maskBit = maskBit << (8 - COLOR_BITS);
+
+  uint8_t cb = pixel[0] & maskBit;
+  uint8_t cg = pixel[1] & maskBit;
+  uint8_t cr = pixel[2] & maskBit;
+
+#endif
   Vec3b newpixel(cb, cg, cr);
 
   return newpixel;
@@ -123,12 +148,16 @@ void dither(Mat *img) {
 }
 
 int main(int argc, char **argv) {
-  char *filePath = "input.jpg";
+  char *filePath = "/home/adrian/input.jpg";
 
   // TODO: Change to be an cli arg
   std::string image_path = samples::findFile(filePath);
-  Mat src = imread(image_path, IMREAD_COLOR);
 
+#if GRAYSCALE
+  Mat src = imread(image_path, IMREAD_GRAYSCALE);
+#else
+  Mat src = imread(image_path, IMREAD_COLOR);
+#endif
   if (src.empty()) {
     std::cout << "Could not read the image: " << image_path << std::endl;
     return 1;
