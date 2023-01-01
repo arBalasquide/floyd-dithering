@@ -1,6 +1,6 @@
 # floyd-dithering
 
-Simple C++ program to reduce colors of an image and applying Floyd-Steinbegr Dithering algorithm.
+Simple C++ program to reduce colors of an image and applying Floyd-Steinberg Dithering algorithm.
 
 ## Build
 
