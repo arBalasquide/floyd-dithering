@@ -21,7 +21,7 @@ using namespace cv;
 #define COLOR_BITS 0
 
 // Set COLOR_BITS to 0 to reduce colors by a fixed number through k-means
-#define COLOR_CLUSTERS 8
+#define COLOR_CLUSTERS 2
 
 // Do we want to actually dither or just reduce colors?
 #define DITHER true
@@ -31,6 +31,8 @@ using namespace cv;
 
 // Convert image to GRAYSCALE before reducing colors and dithering
 #define GRAYSCALE false
+
+Mat1f colors;
 
 /**
  * Do not let value exceed color range
@@ -46,6 +48,9 @@ int clamp(float value, float min, float max) {
   return value;
 }
 
+/**
+ * Helper function to add error diffussion to each BGR channel
+ */
 Vec3b error_channel_diffussion(Vec3b pixel, const int32_t quant_error[],
                                double bias) {
 
@@ -53,16 +58,36 @@ Vec3b error_channel_diffussion(Vec3b pixel, const int32_t quant_error[],
 
   // dither error diffusion on all 3 BGR channels
   for (int i = 0; i < 3; i++) {
-    k[i] += int32_t(float(quant_error[i] * bias));
+    k[i] = clamp(pixel[i] + int32_t(float(quant_error[i] * bias)),0, 255);
+
+    pixel[i] = k[i];
   }
 
-  pixel[0] = clamp(k[0], 0, 255);
-  pixel[1] = clamp(k[1], 0, 255);
-  pixel[2] = clamp(k[2], 0, 255);
+  // the further rgb colors can be from each othere is around ~400
+  float min_err = 65535;
+
+  // we want to limit colors to our palette so find closest color
+  for (int j = 0; j < COLOR_CLUSTERS; j++) {
+    float dst = sqrt((colors(j, 0) - k[0]) * (colors(j, 0) - k[0]) +
+                     (colors(j, 1) - k[1]) * (colors(j, 1) - k[1]) +
+                     (colors(j, 2) - k[2]) * (colors(j, 2) - k[2]));
+
+    if (dst < min_err) {
+      min_err = dst;
+
+      pixel[0] = uint8_t(colors(j, 0));
+      pixel[1] = uint8_t(colors(j, 1));
+      pixel[2] = uint8_t(colors(j, 2));
+    }
+  }
 
   return pixel;
 }
 
+/**
+ * Add biased noise to the image to improve the quality of the reduced color
+ * image
+ */
 void error_diffusion(Mat *img, const int32_t quant_error[], int x, int y) {
 
 #if ATKINSON
@@ -105,13 +130,13 @@ Mat reduce_color_pallete(Mat *img) {
   data.convertTo(data, CV_32F);
 
   std::vector<int> labels;
-  Mat1f colors;
   kmeans(data, k, labels, cv::TermCriteria(), 1, cv::KMEANS_PP_CENTERS, colors);
 
   for (int i = 0; i < n; i++) {
-    data.at<float>(i, 0) = colors(labels[i], 0);
-    data.at<float>(i, 1) = colors(labels[i], 1);
-    data.at<float>(i, 2) = colors(labels[i], 2);
+
+    data.at<float>(i, 0) = clamp(colors(labels[i], 0), 0, 255);
+    data.at<float>(i, 1) = clamp(colors(labels[i], 1), 0, 255);
+    data.at<float>(i, 2) = clamp(colors(labels[i], 2), 0, 255);
   }
 
   Mat reduced = data.reshape(3, img->rows);
@@ -120,7 +145,7 @@ Mat reduce_color_pallete(Mat *img) {
   return reduced;
 }
 
-Vec3b find_closest_palette_color(Vec3b pixel) {
+Vec3b reduce_color_bits(Vec3b pixel) {
 
 // I like how the second one changes the colors, the differences are a bit
 // subtle try it out and see which one you like most
@@ -155,40 +180,44 @@ Vec3b find_closest_palette_color(Vec3b pixel) {
 
 // https://en.wikipedia.org/wiki/Floyd%E2%80%93Steinberg_dithering
 void dither(Mat *img) {
-  int rows = img->rows - 1;
-  int cols = img->cols - 1;
+  int rows = img->rows;
+  int cols = img->cols;
 
 #if !COLOR_BITS
   Mat reducedImg = reduce_color_pallete(img);
 #endif
 
-  for (int i = 1; i < rows; i++) {
+  for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
       Vec3b pixel = img->at<Vec3b>(i, j);
 #if !COLOR_BITS
       Vec3b newpixel = reducedImg.at<Vec3b>(i, j);
 #else
-      Vec3b newpixel = find_closest_palette_color(pixel);
+      Vec3b newpixel = reduce_color_bits(pixel);
 #endif
 
       // pixels are unsigned so we want to make sure we get negative values here
       // for error to get distributed properly
-      const int32_t quant_error[3] = {(int32_t)pixel[0] - (int32_t)newpixel[0],
-                                      (int32_t)pixel[1] - (int32_t)newpixel[1],
-                                      (int32_t)pixel[2] - (int32_t)newpixel[2]};
+      const int32_t quant_error[3] = {int32_t(pixel[0] - newpixel[0]),
+                                      int32_t(pixel[1] - newpixel[1]),
+                                      int32_t(pixel[2] - newpixel[2])};
 
       // overwrite image with new pixel
       img->at<Vec3b>(i, j) = newpixel;
 
 #if DITHER
-      error_diffusion(img, quant_error, i, j);
+      // since error diffussion goes back and forward, make sure we don't go out
+      // of bound...
+      if (i != 0 && j != cols) {
+        error_diffusion(img, quant_error, i, j);
+      }
 #endif
     }
   }
 }
 
 int main(int argc, char **argv) {
-  std::string filePath = "/home/adrian/input.jpg";
+  std::string filePath = "/home/adrian/ct.png";
 
   // TODO: Change to be an cli arg
   std::string image_path = samples::findFile(filePath);
